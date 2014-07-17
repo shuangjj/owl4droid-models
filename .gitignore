@@ -1,5 +1,6 @@
 # temporary files
 *.pyc
+*.swp
 
 #
 /tools
