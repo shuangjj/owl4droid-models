@@ -30,35 +30,56 @@ import decrypt, dbdecrypt, dbmerge
 DES_key = 'changeme'
 
 # Parameters
-INDENT_T1 = '\t\t'
-INDENT_L1 = '\t'
+INDENT_L1 = ' ' * 1
+INDENT_L2 = ' ' * 2
+INDENT_L4 = ' ' * 4
 
 def main():
+    print INDENT_L1, '+--------------------------------------------------------------------+'
+    print INDENT_L1, '| AMSC : Automatic Mobile Scene Classification                       |' 
+    print INDENT_L1, '| Probes: audio                                                      |'
+    print INDENT_L1, '| Author: Shuang Liang <shuang.liang2012@temple.edu>                 |'
+    print INDENT_L1, '+--------------------------------------------------------------------+'
     ## Training
     X = []
+    # y = ['office', 'home', 'cafe', 'station', 'gym', 'test']
     y = ['office', 'cafe']
-    mfccs_office = readFeatureSequence(y[0])
-    mfccs_cafe = readFeatureSequence(y[1])
-    X.append(np.mean(mfccs_office, axis=0))
-    X.append(np.mean(mfccs_cafe, axis=0))
+
+    # Read the training samples
+    for scene in y:
+        mfccs = readFeatureSequence(scene, 'train')
+        # Take the average of mfccs of audio frames as features
+        X.append(np.mean(mfccs, axis=0))       
+
+
     # Gaussian Naive Bayes
-    print INDENT_T1, ">> Training Gaussian Naive Bayes <<"
+    print INDENT_L2, ">> Training Gaussian Naive Bayes <<"
     model = trainNB(np.array(X), y)
-    # Test
-    print INDENT_T1, ">> Testing NB model <<"
-    scene = 'home'
-    mfccs = readFeatureSequence(scene)
-    X = np.array([np.mean(mfccs, axis=0)])
-    print INDENT_L1, 'Test %s with result: ' % scene, sorted(y), model.predict_proba(X)
+
+    ## Test
+    print INDENT_L2, ">> Testing Gaussian Naive Bayes Model <<"
+    scene = 'office'
+    mfccs = readFeatureSequence(scene, 'test')
+    X = np.array([np.mean(mfccs, axis=0)])   
+    print INDENT_L4, 'Test %s with model for [%s], probability: [%s]' % (scene, \
+            ', '.join(sorted(y)), ', '.join(str(x) for x in model.predict_proba(X)[0]))
 
     #score = model.score(X, [scene])
     #print INDENT_L1, "With Gaussian Naive Bayes, the score is %f" % (score)
 
-def readFeatureSequence(scene):
-    print INDENT_L1, ">> Extracting data from ", scene
+    ## Gaussian Hidden Markov Model
+    '''
+    mfccs = readFeatureSequence("home")
+    X = np.array([mfccs])
+    print X.shape
+    trainHMM(X)
+    '''
+    print
+def readFeatureSequence(scene, usage="train"):
+    print INDENT_L4, ">> Extracting data from %s/%s" % (usage, scene)
     TABLE_NAME = 'data'
-    TRAIN_DB_PATH = DATA_PATH + '/train/' + scene + "/"
-    TRAIN_DB_NAME = "merged_train_" + scene + ".db"
+    TRAIN_DB_PATH = DATA_PATH + "/" +  usage + "/" + scene + "/"
+    TRAIN_DB_NAME = "merged_" + usage + "_" + scene + ".db"
     if not os.path.exists(TRAIN_DB_PATH + TRAIN_DB_NAME):
         ## Decrypt database segments 
         for db_seg in os.listdir(TRAIN_DB_PATH):
@@ -82,7 +103,7 @@ def readFeatureSequence(scene):
     for rec in cur:
         audio = af.AudioFeatures(rec) 
         train_seqs.append(audio.getMfccs())
-    print INDENT_L1, "Total # of mfcc features extracted from %s: %d" % (scene, len(train_seqs))
+    print INDENT_L4, "Total # of mfcc features extracted from %s: %d" % (scene, len(train_seqs))
     return train_seqs
 
 #-------------------------------------------------------------------------------
@@ -90,7 +111,7 @@ def readFeatureSequence(scene):
 #-------------------------------------------------------------------------------
 def trainNB(X, y):
     model = GaussianNB()
-    print INDENT_L1, "Shape of data feed to classifier: ", X.shape
+    print INDENT_L4, "Shape of data feed to classifier: ", X.shape
     model.fit(X, y)
     return model
 
@@ -102,17 +123,8 @@ def trainHMM(X):
     # Use unsupervised Baum-Welch to train HMM for different locations/scenes
     # 3-states, full covariance 
     model = hmm.GaussianHMM(3, "full")
-    '''
-    X = np.array(train_seqs)
-    X = np.rot90(X, 1)
-    X = np.flipud(X)
-    X = np.array([X])
-    print X[0].shape
-    '''
     # One obervation with length len(X[0]), n_feature = 12
     #print train_seqs
-    #X = np.array([train_seqs])
-    print X.shape
     #print X[0].shape
     model.fit(X)
     #states = model.predict(X[0])
