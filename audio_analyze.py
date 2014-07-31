@@ -6,6 +6,10 @@ import sqlite3
 import ast
 import datetime as dt
 import audio_features as af
+import light_features as lf
+import bluetooth_features as bf
+import wifi_features as wf
+
 #import nltk : needs tagged token, which combine a basic token value with a tag.
 # refer to [http://docs.huihoo.com/nltk/0.9.5/guides/tag.html] for details
 import numpy as np
@@ -15,6 +19,8 @@ from sklearn.naive_bayes import GaussianNB
 #from hmmlearn import hmm
 import math
 import os
+from optparse import OptionParser
+import ast
  
 ## Funf framework 
 FUNFSENS_ROOT = "/home/shuang/workspace/funfsens/"
@@ -35,33 +41,101 @@ INDENT_L2 = ' ' * 2
 INDENT_L4 = ' ' * 4
 
 def main():
+    ## Test
+    # readFeatureSequence('test', 'train')
+    # return
+
+    ## Command argument parsing
+    parser = OptionParser()
+    parser.add_option("-t", "--test", dest="testscene", default="test",
+            help="test scene", metavar="TEST_SCENE")
+
+    parser.add_option("-s", "--scenes", dest="scenes", default="office",
+            help="train scenes", metavar="TRAIN_SCENES")
+
+    parser.add_option("-f", "--features", dest="features", default="audio light",
+            help="", metavar="FEATURES")
+
+    (options, args) = parser.parse_args()
+    
+
     print INDENT_L1, '+--------------------------------------------------------------------+'
     print INDENT_L1, '| AMSC : Automatic Mobile Scene Classification                       |' 
     print INDENT_L1, '| Probes: audio                                                      |'
     print INDENT_L1, '| Author: Shuang Liang <shuang.liang2012@temple.edu>                 |'
     print INDENT_L1, '+--------------------------------------------------------------------+'
     ## Training
-    X = []
+    X = []      # Observations
+    # Classes
     # y = ['office', 'home', 'cafe', 'station', 'gym', 'test']
-    y = ['office', 'cafe']
+    y = options.scenes.split() #['office', 'cafe', 'home']
 
-    # Read the training samples
+    ## Obtain features from the training samples
+    features = options.features.split()
     for scene in y:
-        mfccs = readFeatureSequence(scene, 'train')
-        # Take the average of mfccs of audio frames as features
-        X.append(np.mean(mfccs, axis=0))       
+        V = []  # Feature vector
+        #  Audio
+        if('audio' in features):
+            mfccs = readAudioFeature('train', scene)
+            # Take the average of mfccs of audio frames as features
+            mfcc = np.mean(mfccs, axis=0)
+            V = V + mfcc.tolist()
 
+        # Light
+        if('light' in features):
+            luxs = readLightFeature('train', scene)
+            lux = np.mean(luxs, axis=0)
+            V = V + [lux]
+
+        # Bluetooth
+        if('bluetooth' in features):
+            mAddresses = readBluetoothFeature('train', scene)
+            print mAddresses
+
+        # Wifi feature
+        if('wifi' in features):
+            bssids = readWifiFeature('train', scene)
+            print bssids
+
+        # Add observation for scene
+        if len(V) > 0:
+            X.append(np.array(V))       
+
+    if len(X) == 0:
+        print 'No feature selected'
+    else:
+        print X
 
     # Gaussian Naive Bayes
     print INDENT_L2, ">> Training Gaussian Naive Bayes <<"
     model = trainNB(np.array(X), y)
 
-    ## Test
+    ## Test ##
     print INDENT_L2, ">> Testing Gaussian Naive Bayes Model <<"
-    scene = 'office'
-    mfccs = readFeatureSequence(scene, 'test')
-    X = np.array([np.mean(mfccs, axis=0)])   
-    print INDENT_L4, 'Test %s with model for [%s], probability: [%s]' % (scene, \
+    usage = 'train'
+    scene = options.testscene
+    V = []  # Feature vector
+    X = []
+    #  Audio
+    if('audio' in features):
+        mfccs = readAudioFeature(usage, scene)
+        # Take the average of mfccs of audio frames as features
+        mfcc = np.mean(mfccs, axis=0)
+        V = V + mfcc.tolist()
+    # Light
+    if('light' in features):
+        luxs = readLightFeature(usage, scene)
+        lux = np.mean(luxs, axis=0)
+        V = V + [lux]
+
+    # Add observation for scene
+    if len(V) > 0:
+        X.append(np.array(V))
+        print X
+        X = np.array(X)
+        print INDENT_L4, "Shape of data feed to model: ", X.shape
+
+    print INDENT_L4, '>> Test %s with model for [%s], probability: [%s]' % (scene, \
             ', '.join(sorted(y)), ', '.join(str(x) for x in model.predict_proba(X)[0]))
 
     #score = model.score(X, [scene])
@@ -75,11 +149,15 @@ def main():
     trainHMM(X)
     '''
     print
-def readFeatureSequence(scene, usage="train"):
-    print INDENT_L4, ">> Extracting data from %s/%s" % (usage, scene)
-    TABLE_NAME = 'data'
-    TRAIN_DB_PATH = DATA_PATH + "/" +  usage + "/" + scene + "/"
-    TRAIN_DB_NAME = "merged_" + usage + "_" + scene + ".db"
+#-------------------------------------------------------------------------------
+# Decrypt and merge DB segments
+# Return the path of merged DB
+#-------------------------------------------------------------------------------
+TABLE_NAME = 'data'
+def fetchDB(usage='train', feature='audio', scene='office'):
+    print INDENT_L4, ">> Fetching DB for %s/%s/%s" % (usage, feature, scene)
+    TRAIN_DB_PATH = DATA_PATH + '/' +  usage + '/' + feature + '/' + scene + '/'
+    TRAIN_DB_NAME = "merged_" + usage + "_" + feature + '_' + scene + ".db"
     if not os.path.exists(TRAIN_DB_PATH + TRAIN_DB_NAME):
         ## Decrypt database segments 
         for db_seg in os.listdir(TRAIN_DB_PATH):
@@ -92,17 +170,81 @@ def readFeatureSequence(scene, usage="train"):
     #else:
         #print "%s already exists!" % (TRAIN_DB_OFFICE)
 
-    ## SQLite3 database
     db = TRAIN_DB_PATH + TRAIN_DB_NAME
-    conn = sqlite3.connect(db)
+    return db
+
+#-------------------------------------------------------------------------------
+# Read Bluetooth features from DB
+#-------------------------------------------------------------------------------
+def readBluetoothFeature(usage, scene):
+    ## Connect to Sqlite3 DB
+    conn = sqlite3.connect(fetchDB(usage, 'bluetooth', scene))
+    cur = conn.cursor()
+    ## Extract Bluetoth feature
+    cur.execute("SELECT * FROM " + TABLE_NAME)
+    bluetooth_features = []
+    for rec in cur:
+        bluetooth = bf.BluetoothFeatures(rec)
+        feature = (bluetooth.getDeviceName(), bluetooth.getDeviceAddress())
+        bluetooth_features.append(feature[1])
+    conn.close()
+    #print bluetooth_features
+    print INDENT_L4, "Total # of bluetooth features extracted from %s: %d" % (scene, len(bluetooth_features))
+    return list(set(bluetooth_features))
+    
+#-------------------------------------------------------------------------------
+# Read Wifi features from DB
+#-------------------------------------------------------------------------------
+def readWifiFeature(usage, scene):
+    ## Connect to Sqlite3 DB
+    conn = sqlite3.connect(fetchDB(usage, 'wifi', scene))
+    cur = conn.cursor()
+    ## Extract light feature
+    cur.execute("SELECT * FROM " + TABLE_NAME)
+    wifi_features = []
+    for rec in cur:
+        wifi = wf.WifiFeatures(rec)
+        feature = (wifi.getSSID(), wifi.getBSSID())
+        wifi_features.append(feature[1])
+    conn.close()
+    #print wifi_features
+    print INDENT_L4, "Total # of wifi features extracted from %s: %d" % (scene, len(wifi_features))
+    return list(set(wifi_features))
+#-------------------------------------------------------------------------------
+# Read light feature from DB
+#-------------------------------------------------------------------------------
+def readLightFeature(usage, scene):
+    ## Connect to Sqlite3 DB
+    conn = sqlite3.connect(fetchDB(usage, 'light', scene))
+    cur = conn.cursor()
+    ## Extract light feature
+    cur.execute("SELECT * FROM " + TABLE_NAME)
+    audio_features = []
+    for rec in cur:
+        light = lf.LightFeatures(rec)
+        #print light.getLux()
+        audio_features.append(light.getLux())
+    conn.close()
+    print INDENT_L4, "Total # of light features extracted from %s: %d" % (scene, len(audio_features))
+
+    return audio_features
+#-------------------------------------------------------------------------------
+# Read audio feature from DB
+#-------------------------------------------------------------------------------
+def readAudioFeature(usage, scene):
+    ## SQLite3 database
+    conn = sqlite3.connect(fetchDB(usage, 'audio', scene))
     cur = conn.cursor()
 
-    ## Fetch and extract data
+    ## Fetch and extract features
     train_seqs = []
     cur.execute("SELECT * FROM " + TABLE_NAME)
     for rec in cur:
-        audio = af.AudioFeatures(rec) 
-        train_seqs.append(audio.getMfccs())
+       audio = af.AudioFeatures(rec) 
+       train_seqs.append(audio.getMfccs())
+
+    conn.close()
+
     print INDENT_L4, "Total # of mfcc features extracted from %s: %d" % (scene, len(train_seqs))
     return train_seqs
 
