@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # File: bluetooth_features.py
 # Bluetooth feature extraction from BluetoothProbe data
+from db_helper import DBHelper
 
 import ast
 import datetime as dt
