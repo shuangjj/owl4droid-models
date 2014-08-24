@@ -8,6 +8,9 @@ import light_features as lf
 import bluetooth_features as bf
 import wifi_features as wf
 
+import ast
+import datetime as dt
+
 from constants import *
 
 import numpy as np
@@ -36,6 +39,25 @@ def getFeatureVector(usage, scene, features):
         bssids = readWifiFeature(usage, scene)
         print bssids
     return V
+
+class FeatureRecord:
+    def __init__(self, rec):
+        self.data_id = rec[0]
+        #self.dev_id = rec[1]
+        self.probe = rec[1]
+        self.timestamp = rec[2]
+        self.values = rec[3]
+        # Convert string values to python map style feature set
+        self.features = ast.literal_eval(self.values)
+
+    def getDateHour(self):
+        return dt.datetime.fromtimestamp(self.timestamp).strftime('%Y-%m-%d-%H')
+
+    def getHour(self):
+        print ''
+
+    def getTime(self):
+        return dt.datetime.fromtimestamp(self.timestamp).strftime('%Y-%m-%d %H:%M:%S') 
 
 #-------------------------------------------------------------------------------
 # Read Bluetooth features from DB

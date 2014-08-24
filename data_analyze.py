@@ -81,6 +81,8 @@ def main():
 
 #-------------------------------------------------------------------------------
 # Train Naive Bayes
+# X is python style two dimentional array (n_samples, n_features) of observations 
+# y is the target values (n_samples)
 #-------------------------------------------------------------------------------
 def trainNB(X, y):
     if len(X) == 0:
@@ -94,7 +96,10 @@ def trainNB(X, y):
     print INDENT_L4, "Shape of data feed to classifier: ", X.shape
     model.fit(X, y)
     return model
-
+#-------------------------------------------------------------------------------
+# Test naive bayes model with test vector T (n_samples, n_classes/n_scenes)
+# Return the probability of the samples for each class (in sorted order)
+#-------------------------------------------------------------------------------
 def testNB(model, T):
     if len(T) == 0:
         print 'No test feature selected'

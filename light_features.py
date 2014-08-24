@@ -4,6 +4,7 @@
 
 import ast
 import datetime as dt
+import sqlite3
 
 class LightFeatures():
     def __init__(self, rec):

@@ -7,8 +7,8 @@ import os
 import sqlite3
 ## Funf framework path config
 FUNFSENS_ROOT = "/home/shuang/workspace/funfsens/"
-SCRIPT_PATH = FUNFSENS_ROOT + "scripts-0.2.3"
-DATA_PATH = FUNFSENS_ROOT + "myserver/uploads"
+SCRIPT_PATH = FUNFSENS_ROOT + "scripts-0.2.3/"
+DATA_PATH = SCRIPT_PATH + "myserver/uploads"
 
 import sys
 sys.path.insert(0, SCRIPT_PATH + "/data_processing")
@@ -18,6 +18,10 @@ DES_key = 'changeme'
 TABLE_NAME = 'data'
 
 class DBHelper:
+    def __init__(self, path):
+        self.dbDir = path
+
+
     def __init__(self, usage='train', feature='audio', scene='office', data_root=DATA_PATH):
         self.data_root = data_root
         self.usage = usage
@@ -50,7 +54,7 @@ class DBHelper:
     #---------------------------------------------------------------------------
     def fetchData(self):
         ## Connect to Sqlite3 DB
-        self.conn = sqlite3.connect(self.dbDir)
+        self.conn = sqlite3.connect(self.dbDir,detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES )
         cur = self.conn.cursor()
         ## Extract Bluetoth feature
         cur.execute("SELECT * FROM " + TABLE_NAME)
