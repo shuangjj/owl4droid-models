@@ -2,22 +2,13 @@
 # File: audio_analyze.py
 # Read audio data from db and analyze/classify audio feature
 
-import ast
-import datetime as dt
-import numpy as np
-#import nltk : needs tagged token, which combine a basic token value with a tag.
-# refer to [http://docs.huihoo.com/nltk/0.9.5/guides/tag.html] for details
-from sklearn import hmm 
-from sklearn.naive_bayes import GaussianNB
-#: removed since 0.17 release of scikit-learn
-#from hmmlearn import hmm
-import math
 import os
 from optparse import OptionParser
-import ast
 
 from constants import *
+import models
 import features
+import db_helper
 
 def main():
     ## Test
@@ -29,11 +20,11 @@ def main():
     parser.add_option("-t", "--test", dest="testscene", default="test",
             help="test scene", metavar="TEST_SCENE")
 
-    parser.add_option("-s", "--scenes", dest="scenes", default="office",
+    parser.add_option("-n", "--train", dest="trainscenes", default="office",
             help="train scenes", metavar="TRAIN_SCENES")
 
-    parser.add_option("-f", "--features", dest="features", default="audio light",
-            help="", metavar="FEATURES")
+    parser.add_option("-s", "--sensors", dest="sensors", default="audio light",
+            help="", metavar="SENSORS")
 
     (options, args) = parser.parse_args()
     
@@ -46,90 +37,155 @@ def main():
     ## Training
     # Classes
     # y = ['office', 'home', 'cafe', 'station', 'gym', 'test']
-    scenes = options.scenes.split() #['office', 'cafe', 'home']
-    featureEnrolled = options.features.split()
+    scenes = options.trainscenes.split() #['office', 'cafe', 'home']
+    sensors = options.sensors.split()
 
     X = []      # Observations
+    light_obs = [] # (scene, observations)
+    audio_obs = []
+    wifi_obs = []
+    bluetooth_obs = []
     for scene in scenes:
-        V = features.getFeatureVector('train', scene, featureEnrolled)
-        # Add observation for scene
-        if len(V) > 0:
-            X.append(np.array(V))       
+        for sensor in sensors:
+            S = getSampleFeatureSet('train', scene, sensor)
+            # Add observation set for scene
+            if len(S) > 0:
+                if sensor == 'light':
+                    light_obs.append((scene, S))
+                elif sensor == 'audio':
+                    audio_obs.append((scene, S))
+                elif sensor == 'wifi':
+                    wifi_obs.append((scene, S))
+                elif sensor == 'bluetooth':
+                    bluetooth_obs.append((scene, S)) 
+                else:
+                    print 'Unsupported sensor %s' % (sensor)
 
-    # Gaussian Naive Bayes
-    print INDENT_L2, ">> Training Gaussian Naive Bayes <<"
-    model = trainNB(X, scenes)
+                print 'Got %d train samples for %s->%s' % (len(S), scene, sensor)
 
-    ## Test ##
-    print INDENT_L2, ">> Testing Gaussian Naive Bayes Model <<"
-    T = []
-    V = features.getFeatureVector('test', options.testscene,featureEnrolled)
-    if len(V) > 0:
-        T.append(np.array(V))
 
-    results = testNB(model, T)
-    print INDENT_L4, '>> Test %s with model for [%s], probability: [%s]' % (options.testscene, \
-            ', '.join(sorted(scenes)), ', '.join(str(x) for x in results))
 
-    score = model.score(np.array(T), [options.testscene])
-    print INDENT_L1, "With Gaussian Naive Bayes, the score is %f" % (score)
+    test_light = [];    test_audio = []
+    test_wifi = [];     test_bluetooth = [] 
+    testscene = options.testscene
+    for sensor in sensors:
+        S = getSampleFeatureSet('test', testscene, sensor)
+        # Add observation set for test
+        if len(S) > 0:
+            if sensor == 'light':
+                test_light.append((testscene, S))
+            elif sensor == 'audio':
+                test_audio.append((testscene, S))
+            elif sensor == 'wifi':
+                test_wifi.append((testscene, S))
+            elif sensor == 'bluetooth':
+                test_bluetooth.append((testscene, S)) 
+            else:
+                print 'Unsupported sensor %s' % (sensor)
 
+            print 'Got %d test samples for %s->%s' % (len(S), scene, sensor)   
+    if 'light' in sensors:
+        light = models.LightModel(scenes)
+        if light.setTrainVector(light_obs) > 0:
+            model = light.trainNB()
+            if light.setTestVector(test_light) > 0:
+                light.testNB(model)
+
+    if 'audio' in sensors:
+        audio = models.AudioModel(scenes)
+        if audio.setTrainVector(audio_obs) > 0:
+            model = audio.trainNB()
+            if audio.setTestVector(test_audio) > 0:
+                audio.testNB(model)
     ## Gaussian Hidden Markov Model
    # trainHMM(X)
    # testHMM(model, T)
    
 
-#-------------------------------------------------------------------------------
-# Train Naive Bayes
-# X is python style two dimentional array (n_samples, n_features) of observations 
-# y is the target values (n_samples)
-#-------------------------------------------------------------------------------
-def trainNB(X, y):
-    if len(X) == 0:
-        print 'No feature selected'
-        return
-    else:
-        print X
-    X = np.array(X)
 
-    model = GaussianNB()
-    print INDENT_L4, "Shape of data feed to classifier: ", X.shape
-    model.fit(X, y)
-    return model
+def getSampleDBPaths(usage, scene, sensor='%', location='%', date='%', hour='%'):
+    db = db_helper.DBHelper(FUNFDB, SERVER_PATH)
+    query_sql = "SELECT sensor, dbpath FROM %s WHERE usage LIKE ? AND scene LIKE ? \
+            AND sensor LIKE ? AND location LIKE ? \
+            AND date LIKE ? AND strftime('%%H', time) LIKE ?" % (FUNFTBL)
+    rows = db.query_db(query_sql, (usage, scene, sensor, location, date, hour))
+    return rows
+
+def getSampleFeatureSet(usage, scene, sensor):
+    S = []
+    paths = getSampleDBPaths(usage, scene, sensor)
+    if len(paths) == 0:
+        print 'No samples available for %s->%s->%s' % (usage, scene, sensor)
+        return S
+    #print 'Got %d samples for %s->%s->%s' % (len(paths), usage, scene, sensor)
+    for sensor, dbpath in paths:
+        if sensor == 'light':
+            V = getLightSampleValues(dbpath)
+        elif sensor == 'audio':
+            V = getAudioSampleValues(dbpath)
+        elif sensor == 'wifi':
+            V = getWifiSampleValues(dbpath)
+        elif sensor == 'bluetooth':
+            V = getBluetoothSampleValues(dbpath)
+        else:
+            print 'Sensor type %s not supported' % sensor
+        if len(V) > 0:
+            S.append(V)
+    return S
+
+def getDBDataByPath(dbdir):
+    dbname = os.path.split(dbdir)[1]
+    dbpath = os.path.join(SERVER_PATH, os.path.split(dbdir)[0])
+    db = db_helper.DBHelper(dbname, dbpath)
+    query_sql = "SELECT * FROM %s" % DATA_TABLE_NAME
+    return db.query_db(query_sql, ())
 #-------------------------------------------------------------------------------
-# Test naive bayes model with test vector T (n_samples, n_classes/n_scenes)
-# Return the probability of the samples for each class (in sorted order)
+# Read light sample values into set
 #-------------------------------------------------------------------------------
-def testNB(model, T):
-    if len(T) == 0:
-        print 'No test feature selected'
-        return
-    else:
-        print T
-        T = np.array(T)
-        print INDENT_L4, "Shape of data feed to model: ", T.shape
-    return model.predict_proba(T)[0]
+def getLightSampleValues(dbdir):
+    rows = getDBDataByPath(dbdir)
+    S = []
+    for rec in rows:
+        light = features.LightFeatures(rec)
+        S.append(light.getLux())
+    print INDENT_L4, "Extract %d light values from %s" % (len(S), os.path.basename(dbdir))
+    return S
+
 #-------------------------------------------------------------------------------
-# Train Hiden Markov Model
+# Read audio sample values into set
 #-------------------------------------------------------------------------------
-def trainHMM(X):
-   ## HMM
-    # Use unsupervised Baum-Welch to train HMM for different locations/scenes
-    # 3-states, full covariance 
-    model = hmm.GaussianHMM(3, "full")
-    # One obervation with length len(X[0]), n_feature = 12
-    #print train_seqs
-    #print X[0].shape
-    model.fit(X)
-    return model
-#--------------------------------------------------------------------------- 
-# Test
-#---------------------------------------------------------------------------
-def testHMM(T):
-    #states = model.predict(X[0])
-    #print "Most likely state sequences: \n%s" % states
-    score = model.score(T[0])
-    print "Observation score for the same data: %f" % score#math.exp(score*math.pow(10, -6))
+def getAudioSampleValues(dbdir):
+    rows = getDBDataByPath(dbdir)
+    S = []
+    for rec in rows:
+        audio = features.AudioFeatures(rec)
+        S.append(audio.getMfccs())
+    print INDENT_L4, "Extract %d audio values from %s" % (len(S), os.path.basename(dbdir))
+    return S
+#-------------------------------------------------------------------------------
+# Read Wifi sample values into set
+#-------------------------------------------------------------------------------
+def getWifiSampleValues(dbdir):
+    rows = getDBDataByPath(dbdir)
+    S = []
+    for rec in rows:
+        wifi = features.WifiFeatures(rec)
+        feature = (wifi.getSSID(), wifi.getBSSID())
+        S.append(feature[1])
+    print INDENT_L4, "Extract %d wifi values from %s" % (len(S), os.path.basename(dbdir))
+    return S
+#-------------------------------------------------------------------------------
+# Read bluetooth sample values into set
+#-------------------------------------------------------------------------------
+def getBluetoothSampleValues(dbdir):
+    rows = getDBDataByPath(dbdir)
+    S = []
+    for rec in rows:
+        bluetooth = features.BluetoothFeatures(rec)
+        feature = (bluetooth.getDeviceName(), bluetooth.getDeviceAddress())
+        S.append(feature[1])
+    print INDENT_L4, "Extract %d bluetooth values from %s" % (len(S), os.path.basename(dbdir))
+    return S
 
 if __name__ == "__main__":
     main()
