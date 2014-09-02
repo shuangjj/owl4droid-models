@@ -6,11 +6,11 @@ INDENT_L4 = ' ' * 4
 
 # Model database
 FUNFDB = 'funfsens.db'
-FUNFTBL = 'funfdata'
+FUNFTBL = 'funfdata_record'
 
 # funf database configs
 DATA_DES_key = 'changeme'
-DATA_TABLE_NAME = 'data'
+DATA_TABLE_NAME = 'funfdata_data'
 
 # Project dirs
 FUNFSENS_ROOT = "/home/shuang/workspace/funfsens/"

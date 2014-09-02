@@ -78,6 +78,9 @@ class WifiFeatures(FeatureRecord):
     def getBSSID(self):
         return self.features["BSSID"]
 
+    def getLevel(self):
+        return self.features["level"]
+
 #-------------------------------------------------------------------------------
 # Bluetooth feature accessors
 #-------------------------------------------------------------------------------
