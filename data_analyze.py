@@ -84,23 +84,24 @@ def main():
                 print 'Unsupported sensor %s' % (sensor)
 
             print 'Got %d test samples for %s->%s' % (len(S), scene, sensor)   
+    # Train and test using light model
     if 'light' in sensors:
         light = models.LightModel(scenes)
+        print INDENT_L4, '=' * 20 + ' Light Classifier ' + '=' * 20
         if light.setTrainVector(light_obs) > 0:
             model = light.trainNB()
             if light.setTestVector(test_light) > 0:
                 light.testNB(model)
 
+    # Train and test using audio model
     if 'audio' in sensors:
         audio = models.AudioModel(scenes)
+        print INDENT_L4, '=' * 20 + ' Audio Classifier ' + '=' * 20
         if audio.setTrainVector(audio_obs) > 0:
             model = audio.trainNB()
             if audio.setTestVector(test_audio) > 0:
                 audio.testNB(model)
-    ## Gaussian Hidden Markov Model
-   # trainHMM(X)
-   # testHMM(model, T)
-   
+  
 
 
 def getSampleDBPaths(usage, scene, sensor='%', location='%', date='%', hour='%'):

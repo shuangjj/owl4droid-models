@@ -10,7 +10,7 @@ FUNFTBL = 'funfdata_record'
 
 # funf database configs
 DATA_DES_key = 'changeme'
-DATA_TABLE_NAME = 'funfdata_data'
+DATA_TABLE_NAME = 'data'
 
 # Project dirs
 FUNFSENS_ROOT = "/home/shuang/workspace/funfsens/"

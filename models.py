@@ -44,7 +44,7 @@ class Model:
         estimate_probs = self.predict_probaNB(model)
         mean_score = self.scoreNB(model)
         print 'Predicted target: ', predicted_targets
-        print ', '.join(str(i) for i in estimate_probs) + ' for ' +  \
+        print '(' + ', '.join(str(i) for i in estimate_probs) + ')' + ' for ' +  \
                 ', '.join(sorted(self.classes))
         print 'Mean score: ', mean_score
  
