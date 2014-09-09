@@ -12,9 +12,17 @@ from sklearn.naive_bayes import GaussianNB
 import math
 from constants import *
 
+import pandas
+from collections import defaultdict
+
 class Model:
-    def __init__(self, classes):
+    def __init__(self, classes, name, weight):
         self.classes = classes
+        self.name = name
+        self.weight = weight
+
+    def getName(self):
+        return self.name
 #-------------------------------------------------------------------------------
 # Train Naive Bayes
 # X is python style two dimentional array (n_samples, n_features) of observations 
@@ -33,21 +41,80 @@ class Model:
     def predictNB(self, model):
         return model.predict(self.testvector)
 
+    def predict_profile(self, model):
+
+        ##
+        scene_false = dict.fromkeys(self.classes, 0)
+        scene_true = dict.fromkeys(self.classes, 0)
+        
+
+        predicted_targets = model.predict(self.testvector)
+        idx = 0
+        for target in self.targets:
+            if target == predicted_targets[idx]:
+                scene_true[target] = scene_true[target] + 1
+            else:
+                scene_false[target] = scene_false[target] + 1
+                #self.weight = self.weight * 0.5
+            idx = idx + 1
+
+        #total = len(predicted_targets)
+        ## Scene false as punishment
+        '''
+        for key in scene_false.keys():
+            print "%s: %d / %d" % (key, scene_false[key], total)
+            scene_false[key] = float(scene_false[key]) / total
+        self.scene_false_rate = scene_false
+        print self.scene_false_rate
+        '''
+        ## Scene true as reward
+        for key in scene_true.keys():
+            total = scene_true[key] + scene_false[key]
+            print "%s: %d - %d / %d" % (key, scene_true[key], scene_false[key], total)
+            if total == 0:
+                scene_true[key]
+            else:
+                scene_true[key] = float(scene_true[key]) / total
+        self.scene_true_rate = scene_true 
+        print self.scene_true_rate
+
+        ## Model score
+        self.score = model.score(self.testvector, self.targets)
+
+        ## Model weight
+        self.weight = self.weight * self.score
+
+
+
+    def vote(self, predict):
+        return self.scene_true_rate[predict] * self.weight
+
     def scoreNB(self, model):
        return model.score(self.testvector, self.targets)
 
     def predict_probaNB(self, model):
-        return model.predict_proba(self.testvector)[0]
+        return model.predict_proba(self.testvector)
 
     def testNB(self, model):
         predicted_targets = self.predictNB(model)
         estimate_probs = self.predict_probaNB(model)
         mean_score = self.scoreNB(model)
-        print 'Predicted target: ', predicted_targets
-        print '(' + ', '.join(str(i) for i in estimate_probs) + ')' + ' for ' +  \
-                ', '.join(sorted(self.classes))
+        print '=' * 20 + " Test result for naive bayes model " + '=' * 20
+        # Prediction result for test vectors
+        print 'Predicted target: ', predicted_targets, ' for ', self.targets
+
+        # Confusion matrix
+        print INDENT_L4, '-' * 80
+        '''
+        ob_idx = 0
+        print '  '.join(sorted(self.classes))
+        for target in self.targets:
+            print target + '  ' + '  '.join(str(i) for i in estimate_probs[ob_idx])
+            ob_idx = ob_idx + 1
+        '''
+        print pandas.DataFrame(estimate_probs, self.targets, sorted(self.classes))
+        print INDENT_L4, '-' * 80
         print 'Mean score: ', mean_score
- 
 #-------------------------------------------------------------------------------
 # Train Hiden Markov Model
 #-------------------------------------------------------------------------------
@@ -74,15 +141,14 @@ class Model:
 
 class AudioModel(Model):
     def __init__(self, classes):
-        Model.__init__(self, classes)
+        Model.__init__(self, classes, 'audio', 1)
 
     def setTrainVector(self, values):
         X = []
         y = []
         for scene, obs in values: 
-            for ob in obs:
-                X.append(np.mean(ob, axis=0))   # Append observation
-                y.append(scene)         # Append target
+            X.append(np.mean(obs, axis=0))   # Append observation
+            y.append(scene)         # Append target
 
         if len(X) == 0:
             print 'No train vector for audio model'
@@ -90,15 +156,15 @@ class AudioModel(Model):
 
         self.trainvector = np.array(X)
         self.labels = y
-        print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
-                'for ' + ', '.join(self.labels)
+        #print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
+        #        'for ' + ', '.join(self.labels)
         return len(self.trainvector)
 
-    def setTestVector(self, obs):
+    def setTestVector(self, scene_obs):
         T = []
         targets = []
-        for scene, obs in obs:
-            T.append(np.mean(obs[0], axis=0))
+        for scene, obs in scene_obs:
+            T.append(np.mean(obs, axis=0))
             targets.append(scene)
         if len(T) == 0:
             print 'No test vector for audio model'
@@ -106,36 +172,37 @@ class AudioModel(Model):
 
         self.testvector = np.array(T)
         self.targets = targets
-        print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
-        print self.testvector
+        #print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
+        #print self.testvector
         return len(self.testvector)
+
 
 class LightModel(Model):
     def __init__(self, classes):
-        Model.__init__(self, classes)
+        Model.__init__(self, classes, 'light', 1)
 
     def setTrainVector(self, values):
         X = []
         y = []
         for scene, obs in values: 
-            for ob in obs:
-                X.append([np.mean(ob)])   # Append observation
-                y.append(scene)         # Append target
+            X.append(np.mean(obs, axis=0))   # Append observation
+            y.append(scene)         # Append target
+
         if len(X) == 0:
             print 'No train vector for light model'
             return 0
 
         self.trainvector = np.array(X)
         self.labels = y
-        print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
-                'for ' + ', '.join(self.labels)
+        #print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
+        #        'for ' + ', '.join(self.labels)
         return len(self.trainvector)
 
-    def setTestVector(self, obs):
+    def setTestVector(self, scene_obs):
         T = []
         targets = []
-        for scene, obs in obs:
-            T.append([np.mean(obs[0])])
+        for scene, obs in scene_obs:
+            T.append(np.mean(obs, axis=0))
             targets.append(scene)
         if len(T) == 0:
             print 'No test vector for light model'
@@ -143,12 +210,81 @@ class LightModel(Model):
 
         self.testvector = np.array(T)
         self.targets = targets
-        print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
-        print self.testvector
+        #print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
+        #print self.testvector
         return len(self.testvector)
 
-    
+class WifiModel(Model):
+    def __init__(self, classes):
+        Model.__init__(self, classes, 'wifi', 1)
 
 
+    def setTrainVector(self, values):
+        X = []
+        y = []
+        for scene, obs in values: 
+            X.append(np.mean(obs, axis=0))   # Append observation
+            y.append(scene)         # Append target
+        if len(X) == 0:
+            print 'No train vector for wifi model'
+            return 0
 
+        self.trainvector = np.array(X)
+        self.labels = y
+        #print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
+        #        'for ' + ', '.join(self.labels)
+        return len(self.trainvector)
+
+    def setTestVector(self, scene_obs):
+        T = []
+        targets = []
+        for scene, obs in scene_obs:
+            T.append(np.mean(obs, axis=0))
+            targets.append(scene)
+        if len(T) == 0:
+            print 'No test vector for wifi model'
+            return 0
+
+        self.testvector = np.array(T)
+        self.targets = targets
+        #print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
+        #print self.testvector
+        return len(self.testvector)
+
+class BluetoothModel(Model):
+    def __init__(self, classes):
+        Model.__init__(self, classes, 'bluetooth', 1)
+
+
+    def setTrainVector(self, values):
+        X = []
+        y = []
+        for scene, obs in values: 
+            X.append(np.mean(obs, axis=0))   # Append observation
+            y.append(scene)         # Append target
+        if len(X) == 0:
+            print 'No train vector for bluetooth model'
+            return 0
+
+        self.trainvector = np.array(X)
+        self.labels = y
+        #print INDENT_L4, "Shape of the train vector", self.trainvector.shape, \
+        #        'for ' + ', '.join(self.labels)
+        return len(self.trainvector)
+
+    def setTestVector(self, scene_obs):
+        T = []
+        targets = []
+        for scene, obs in scene_obs:
+            T.append(np.mean(obs, axis=0))
+            targets.append(scene)
+        if len(T) == 0:
+            print 'No test vector for wifi model'
+            return 0
+
+        self.testvector = np.array(T)
+        self.targets = targets
+        #print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
+        #print self.testvector
+        return len(self.testvector)
 
