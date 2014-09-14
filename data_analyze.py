@@ -11,16 +11,24 @@ import features
 import db_helper
 import numpy as np
 
+from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+
+import matplotlib as mpl
+import pandas
+
 def main():
     ## Command argument parsing
     parser = OptionParser()
-    parser.add_option("-t", "--test", dest="testscene", default="test",
+    parser.add_option("-t", "--test", dest="testscene", \
+            default="bar cafe elevator library office subwaystation",
             help="test scene", metavar="TEST_SCENE")
 
-    parser.add_option("-n", "--train", dest="trainscenes", default="office",
+    parser.add_option("-n", "--train", dest="trainscenes", 
+            default="bar cafe elevator library office subwaystation",
             help="train scenes", metavar="TRAIN_SCENES")
 
-    parser.add_option("-s", "--sensors", dest="sensors", default="audio light",
+    parser.add_option("-s", "--sensors", dest="sensors", default="audio light wifi bluetooth",
             help="", metavar="SENSORS")
 
     (options, args) = parser.parse_args()
@@ -69,6 +77,7 @@ def main():
     ## Collect testing dataset
     test_light = [];    test_audio = []
     test_wifi = [];     test_bluetooth = [] 
+
     test_tuples = enumerateAllSamples('test', test_scenes, sensors[0], sensors[1:])
     print "# of test tuples: ", len(test_tuples)
 
@@ -105,179 +114,178 @@ def main():
     ##------------------------------------------------------------------------------------
     #                  Testing and profiling for individual models
     ##------------------------------------------------------------------------------------
-   
-    ## Audio model 
-    if 'audio' in sensors:
-        audio = models.AudioModel(train_scenes)
-        print INDENT_L4, '=' * 20 + ' Audio Classifier ' + '=' * 20
-        if audio.setTrainVector(train_audio) > 0:
-            audio_model = audio.trainNB()
-            if audio.setTestVector(test_audio) > 0:
-                audio_score = audio.scoreNB(audio_model)
-                audio.predict_profile(audio_model)
-                #audio.testNB(audio_model)
+    learners = []
+    for sensor in sensors:
+        if 'audio' == sensor:
+            learner = models.AudioModel(train_scenes)
+            model_profiling(learner, train_audio, test_audio)
+        elif 'light' == sensor:
+            learner = models.LightModel(train_scenes)
+            model_profiling(learner, train_light, test_light)
+        elif 'wifi' == sensor:
+            learner = models.WifiModel(train_scenes)
+            model_profiling(learner, train_wifi, test_wifi)
+        elif 'bluetooth' == sensor:
+            learner = models.BluetoothModel(train_scenes)
+            model_profiling(learner, train_bluetooth, test_bluetooth)
+        else:
+            print "Unsupported sensor %s, unable to create learners for that" % (sensor)
 
-    ## Light model
-    if 'light' in sensors:
-        light = models.LightModel(train_scenes)
-        print INDENT_L4, '=' * 20 + ' Light Classifier ' + '=' * 20
-        if light.setTrainVector(train_light) > 0:
-            light_model = light.trainNB()
-            if light.setTestVector(test_light) > 0:
-                light_score = light.scoreNB(light_model)
-                light.predict_profile(light_model)
-                #light.testNB(light_model)
+        learners.append(learner)
+        #draw_confusion_matrix(learner.cm, abbreviate_names(train_scenes, scene_abbr_dict), \
+                #abbreviate_names(train_scenes, scene_abbr_dict))
 
-    ## Wifi model
-    if 'wifi' in sensors:
-        wifi = models.WifiModel(train_scenes)
-        print INDENT_L4, '=' * 20 + ' Wifi Classifier ' + '=' * 20
-        if wifi.setTrainVector(train_wifi) > 0:
-            wifi_model = wifi.trainNB()
-            if wifi.setTestVector(test_wifi) > 0:
-                wifi_score = wifi.scoreNB(wifi_model)
-                wifi.predict_profile(wifi_model)
-                #wifi.testNB(wifi_model)
 
-    ## Bluetooth model
-    if 'bluetooth' in sensors:
-        bluetooth = models.BluetoothModel(train_scenes)
-        print INDENT_L4, '=' * 20 + ' Bluetooth Classifier ' + '=' * 20
-        if bluetooth.setTrainVector(train_bluetooth) > 0:
-            bluetooth_model = bluetooth.trainNB()
-            if bluetooth.setTestVector(test_bluetooth) > 0:
-                bluetooth_score = bluetooth.scoreNB(bluetooth_model)
-                bluetooth.predict_profile(bluetooth_model)
-                #bluetooth.testNB(bluetooth_model)
+    ## Setup data table for precision
+    dt_precision = {}
+    dt_recall = {}
+    for learner in learners:
+        precisions = []
+        recalls = []
+        for scene in train_scenes: 
+            precisions.append(learner.scene_precision[scene])
+            recalls.append(learner.scene_recall[scene])
 
+        dt_precision[learner.getName()]  = precisions
+        dt_recall[learner.getName()] = recalls
+
+
+    #draw_barh(learners, dt_precision, abbreviate_names(train_scenes, scene_abbr_dict), 'Precision')
+    #draw_barh(learners, dt_recall, abbreviate_names(train_scenes, scene_abbr_dict), 'Recall')
+
+    xtick_labels = abbreviate_names(train_scenes, scene_abbr_dict)
+    ytick_labels = abbreviate_names(train_scenes, scene_abbr_dict)
+    ## Draw confusion matrix altogether
+    #draw_confusion_matrixes(learners, xtick_labels, ytick_labels)
     ##------------------------------------------------------------------------------------
     #                     Mixed model / majority voting
     ##------------------------------------------------------------------------------------
     print 
     print INDENT_L4, "=" * 40 + " Majority Voting " + "=" * 40
-    ## 
-    total = 0; correct = 0
-    target_classes = sorted(train_scenes)
+    ensemble = models.EnsembleModel(train_scenes, learners)
+    ensemble.recognize(ensemble_tuples)
+    draw_confusion_matrix(ensemble.cm, xtick_labels, ytick_labels)
 
-    ## weights for sensors
-    audio_fsize = 12
-    light_fsize = 1
-    wifi_fsize = 2
-    bluetooth_fsize = 2
+def draw_barh(learners, dt, ytick_label, xlabel):
+    ## Draw precision bar chart
+    fontsize_labels = 15
+    mpl.rc('figure.subplot', left=0.1, right=0.97, top=0.95)
+    mpl.rc('figure', figsize=(6.12, 5.14))
+    mpl.rc('xtick', labelsize=fontsize_labels)
+    mpl.rc('ytick', labelsize=fontsize_labels)
+    # Add colors
+    mpl.colors.ColorConverter.colors.update(dict(
+            atomictangerine = (1.0, 0.6, 0.4),
+            babyblueeyes = (0.63, 0.79, 0.95),
+            babypink = (0.96, 0.76, 0.76),
+            bluebell = (0.64, 0.64, 0.82),
+            brass = (0.71, 0.65, 0.26)
+        ))
+    colors = ['babyblueeyes', 'babypink', 'atomictangerine', 'brass', 'blue', 'red', 'green', 'yellow', 'cyan']
+    patterns = ['//', '\\\\', 'xx', '||']
+    # Set bar values
+    # ticks and labels
+    step = 1.7
+    pos = np.arange(0, len(ytick_label)*step, step)
+    width = 0.3
+    # Draw bar charts for each sensor 
+    fig, ax = plt.subplots()
+    cnt = 0
+    for learner in learners:
+        ax.barh(pos+cnt*width, dt[learner.getName()], width, color=colors[cnt], hatch=patterns[cnt], \
+                label=learner.getName())
+        cnt = cnt + 1
 
-    ## Predict and ensemble 
-    #sample_tuples = enumerateAllSamples('test', test_scenes, sensors[0], sensors[1:])
+    ax.set(yticks=pos+(cnt/2)*width, yticklabels=ytick_label, \
+            ylim=[-width, len(ytick_label)*step+step])
+    ax.set_xlabel(xlabel, fontsize=fontsize_labels)
+    ax.legend(ncol=2, columnspacing=0.1)
+    plt.show()
 
-    for sample_tuple in ensemble_tuples:
-
-        result_vector = np.zeros(len(target_classes))
-        audio_vector = []; light_vector = []; 
-        bluetooth_vector = []; wifi_vector = []
-
-        scene = sample_tuple[0]
-        idx = 1
-        for sensor in sensors:
-            testset = [(scene, sample_tuple[idx])]
-            if sensor == 'audio':
-                audio.setTestVector(testset)
-                audio_predict = audio.predictNB(audio_model)[0]
-                #audio.testNB(audio_model)
-                ## Construct predict vector
-                for t in target_classes:
-                    if t == audio_predict:
-                        audio_vector.append(audio.vote(audio_predict))
-                    else:
-                        audio_vector.append(0)
-                result_vector = result_vector + np.array(audio_vector)
-     
-            elif sensor == 'light':
-                light.setTestVector(testset)
-                light_predict = light.predictNB(light_model)[0]
-                #light.testNB(light_model)
-                for t in target_classes:
-                    if t == light_predict:
-                        light_vector.append(light.vote(light_predict))
-                    else:
-                        light_vector.append(0)
-                result_vector = result_vector + np.array(light_vector)
-
-            elif sensor == 'wifi':
-                wifi.setTestVector(testset)
-                wifi_predict = wifi.predictNB(wifi_model)[0]
-                #wifi.testNB(wifi_model)
-                for t in target_classes:
-                    if t == wifi_predict:
-                        wifi_vector.append(wifi.vote(wifi_predict))
-                    else:
-                        wifi_vector.append(0)
-                result_vector = result_vector + np.array(wifi_vector)
-
-            elif sensor == 'bluetooth':
-                bluetooth.setTestVector(testset)
-                bluetooth_predict = bluetooth.predictNB(bluetooth_model)[0]
-                #bluetooth.testNB(bluetooth_model)
-                for t in target_classes:
-                    if t == bluetooth_predict:
-                        bluetooth_vector.append(bluetooth.vote(bluetooth_predict))
-                    else:
-                        bluetooth_vector.append(0)
-                result_vector = result_vector + np.array(bluetooth_vector)
-            idx = idx + 1
-
-        ## Ensemble
-        result_idx = result_vector.argmax()
-        result_class = target_classes[result_idx]
-        print 
-        print "Ensemble predict %s to %s" % (scene, result_class), result_vector
-        print audio_vector, light_vector, bluetooth_vector, wifi_vector
-        total = total + 1
-        # Correct & Reward 
-        if result_class == scene:
-            correct = correct + 1
-            if 'audio' in sensors and audio_predict == result_class:
-                audio.weight = audio.weight * 1.1
-
-            if 'light' in sensors and light_predict == result_class:
-                light.weight = light.weight * 1.1
-
-            if 'wifi' in sensors and wifi_predict == result_class:
-                wifi.weight = wifi.weight * 1.1
-
-            if 'bluetooth' in sensors and bluetooth_predict == result_class:
-                bluetooth.weight = bluetooth.weight * 1.1
-        # Wrong & Punish
-        else:
-            if 'audio' in sensors and audio_predict == result_class:
-                audio.weight = audio.weight * 0.9
-
-            if 'light' in sensors and light_predict == result_class:
-                light.weight = light.weight * 0.9
-
-            if 'wifi' in sensors and wifi_predict == result_class:
-                wifi.weight = wifi.weight * 0.9
-
-            if 'bluetooth' in sensors and bluetooth_predict == result_class:
-                bluetooth.weight = bluetooth.weight * 0.9
-
-            print "wrong for predict target %s to %s" % (scene, result_class)
-        print '-' * 80
-
+def model_profiling(learner, train_data, test_data):
+    print 
+    print INDENT_L4, '=' * 20 + learner.getName() + ' model profiling ' + '=' * 20
     print
+    if learner.setTrainVector(train_data) > 0:
+        model = learner.trainNB()
+        if learner.setTestVector(test_data) > 0:
+            learner.scoreNB(model)
+            learner.predict_profile(model)
+            ## Confusion matrix
+            predicts = learner.predictNB(model)
+            cm = confusion_matrix(learner.targets, predicts)
+            print cm
+            learner.setConfusionMatrix(cm)
+
+scene_abbr_dict = {
+        'bar': 'bar',
+        'cafe': 'cafe',
+        'elevator': 'elev',
+        'library': 'lib',
+        'office': 'offi', 
+        'subwaystation': 'subw'
+}
+
+def abbreviate_names(names, abbrdict):
+    abbrs = []
+    for name in names:
+        abbrs.append(abbrdict[name])
+    return abbrs
+
+def draw_confusion_matrix(cm, xtick_labels, ytick_labels):
+    fontsize_labels = 12
+    mpl.rc('xtick', labelsize=fontsize_labels)
+    mpl.rc('ytick', labelsize=fontsize_labels)
+    # Vertical configs
+    mpl.rc('figure.subplot', wspace=0, top=1, bottom=0)   
+
+    # Horizontal configs
+    mpl.rc('figure.subplot', left=0.16, right=0.97, hspace=0)
+
+    mpl.rc('figure', figsize=(4.97, 4.04))
+    fig, axes = plt.subplots()
+    ## Show confusion matrix in a separate window
+
+    im = axes.matshow(cm, cmap=plt.cm.GnBu)
+    #plt.title('Confusion Matrix', fontsize=12)
+    axes.set_xticklabels([''] + xtick_labels, fontsize=fontsize_labels)
+    axes.set_yticklabels([''] + ytick_labels, fontsize=fontsize_labels)
+    axes.set_ylabel('Actual Scene', fontsize=fontsize_labels)
+    axes.set_xlabel('Predicted Scene', fontsize=fontsize_labels)
+
+    fig.colorbar(im, ax=axes, shrink=0.8)
+    ## Show figure
+    plt.show()
+
+def draw_confusion_matrixes(learners, xtick_labels, ytick_labels):
+    fontsize_labels = 12
+    mpl.rc('xtick', labelsize=fontsize_labels)
+    mpl.rc('ytick', labelsize=fontsize_labels)
+    #mpl.rc('axes', hold=False)
+    mpl.rc('figure.subplot', left=0, right=1, bottom=0.08, \
+            hspace=0.25, wspace=0)
+    #mpl.rc('figure', figsize=(3.5, 3.5))
     
-    print "Score of individual audio, light, wifi and bluetooth: ", \
-        audio_score if 'audio' in sensors else 'Unavailable', \
-        light_score if 'light' in sensors else 'Unavailable', \
-        wifi_score if 'wifi' in sensors else 'Unavailable', \
-        bluetooth_score if 'bluetooth' in sensors else 'Unavailable'
+    fig, axes = plt.subplots(nrows=2, ncols=2)
+    #fig.suptitle('Confusion Matrix of Sensing Models', fontsize=12)
 
-    print "Voting weights of audio, light, wifi, and bluetooth: ", \
-        audio.weight if 'audio' in sensors else 'Unavailable', \
-        light.weight if 'light' in sensors else 'Unavailable', \
-        wifi.weight if 'wifi' in sensors else 'Unavailable', \
-        bluetooth.weight if 'bluetooth' in sensors else 'Unavailable'
+    idx = 0
+    for ax in axes.flat:
+        im = ax.matshow(learners[idx].cm, cmap=plt.cm.GnBu)
+        ax.set_xticklabels([""]+xtick_labels)
+        ax.set_yticklabels([""]+ytick_labels)
+        # Title
+        ax.text(0.5, -0.1, learners[idx].getName(), fontsize=fontsize_labels, fontweight='bold',\
+                transform=ax.transAxes)
+        idx = idx + 1
 
-    print "Score of majority voting (%d in %d): %f" % (correct, total, float(correct)/total)
-        
+
+    #cax,kw = mpl.colorbar.make_axes([ax for ax in axes.flat], location='right')
+    #plt.colorbar(im, cax=cax, **kw)
+    fig.colorbar(im, ax=axes.ravel().tolist())
+    plt.show()
+
+
 ##----------------------------------------------------------------------------------------
 # Enumerate all samples of all kinds of sensors
 # The order of the returned sample tuples is the same with (base, others)

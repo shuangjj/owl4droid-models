@@ -14,6 +14,7 @@ from constants import *
 
 import pandas
 from collections import defaultdict
+from sklearn.metrics import confusion_matrix
 
 class Model:
     def __init__(self, classes, name, weight):
@@ -23,6 +24,15 @@ class Model:
 
     def getName(self):
         return self.name
+
+    def setConfusionMatrix(self, cm):
+        self.cm = cm
+
+    def setPredictVector(self, pv):
+        self.pv = pv
+
+    def setPredictClass(self, predict):
+        self.predict = predict
 #-------------------------------------------------------------------------------
 # Train Naive Bayes
 # X is python style two dimentional array (n_samples, n_features) of observations 
@@ -31,6 +41,7 @@ class Model:
     def trainNB(self):
         model = GaussianNB()
         model.fit(self.trainvector, self.labels)
+        self.model = model
         return model
 #-------------------------------------------------------------------------------
 # Test naive bayes model with test vector T 
@@ -44,53 +55,58 @@ class Model:
     def predict_profile(self, model):
 
         ##
-        scene_false = dict.fromkeys(self.classes, 0)
-        scene_true = dict.fromkeys(self.classes, 0)
+        scene_precision = dict.fromkeys(self.classes, 0.0)
+        scene_recall = dict.fromkeys(self.classes, 0.0)
+        scene_FP = dict.fromkeys(self.classes, 0)
+        scene_TP = dict.fromkeys(self.classes, 0)
+        scene_FN = dict.fromkeys(self.classes, 0)
         
 
         predicted_targets = model.predict(self.testvector)
         idx = 0
-        for target in self.targets:
-            if target == predicted_targets[idx]:
-                scene_true[target] = scene_true[target] + 1
+
+        for predict in predicted_targets:
+            if predict == self.targets[idx]:
+                scene_TP[predict] = scene_TP[predict] + 1
             else:
-                scene_false[target] = scene_false[target] + 1
+                print predict, self.targets[idx]
+                scene_FP[predict] = scene_FP[predict] + 1
+                scene_FN[self.targets[idx]] = scene_FN[self.targets[idx]] + 1
                 #self.weight = self.weight * 0.5
             idx = idx + 1
 
-        #total = len(predicted_targets)
-        ## Scene false as punishment
-        '''
-        for key in scene_false.keys():
-            print "%s: %d / %d" % (key, scene_false[key], total)
-            scene_false[key] = float(scene_false[key]) / total
-        self.scene_false_rate = scene_false
-        print self.scene_false_rate
-        '''
-        ## Scene true as reward
-        for key in scene_true.keys():
-            total = scene_true[key] + scene_false[key]
-            print "%s: %d - %d / %d" % (key, scene_true[key], scene_false[key], total)
-            if total == 0:
-                scene_true[key]
+        ## Calculate precision and recall
+        for key in scene_TP.keys():
+            total1 = scene_TP[key] + scene_FP[key]  
+            total2 = scene_TP[key] + scene_FN[key]
+            if total1 == 0:
+                scene_precision[key] = 0.0
             else:
-                scene_true[key] = float(scene_true[key]) / total
-        self.scene_true_rate = scene_true 
-        print self.scene_true_rate
+                scene_precision[key] = float(scene_TP[key]) / total1 # TP/(TP+FP)
+
+            if total2 == 0:
+                scene_recall[key] = 0.0
+            else:
+                scene_recall[key] = float(scene_TP[key]) / total2   # TP/(TP+FN)
+
+        self.scene_precision = scene_precision
+        self.scene_recall = scene_recall
+        print self.getName(), scene_precision, scene_recall
 
         ## Model score
-        self.score = model.score(self.testvector, self.targets)
+        self.recognition_rate = model.score(self.testvector, self.targets)
 
-        ## Model weight
-        self.weight = self.weight * self.score
+        ## Model weight initialized to model score
+        self.weight = self.weight * self.recognition_rate
 
 
 
     def vote(self, predict):
-        return self.scene_true_rate[predict] * self.weight
+        return self.scene_precision[predict] * self.weight
 
     def scoreNB(self, model):
-       return model.score(self.testvector, self.targets)
+        self.score = model.score(self.testvector, self.targets)
+        return self.score
 
     def predict_probaNB(self, model):
         return model.predict_proba(self.testvector)
@@ -287,4 +303,91 @@ class BluetoothModel(Model):
         #print INDENT_L4, "Shape of test vector", self.testvector.shape, 'for ' + ', '.join(targets)
         #print self.testvector
         return len(self.testvector)
+
+# 
+# Order of learners in the learners list should the same as sensor list
+#
+class EnsembleModel:
+    def __init__(self, classes, learners):
+        self.classes = classes
+        self.learners = learners
+        self.learnerlist = []
+        for learner in learners:
+            self.learnerlist.append(learner.getName())
+
+    def recognize(self, ensemble_tuples):
+        ## 
+        total = 0; correct = 0
+        target_classes = sorted(self.classes)
+
+        ## Predict and ensemble 
+        #sample_tuples = enumerateAllSamples('test', test_scenes, sensors[0], sensors[1:])
+
+        targets = []; predicts = []
+        for sample_tuple in ensemble_tuples:
+            result_vector = np.zeros(len(target_classes))
+            audio_vector = []; light_vector = []; 
+            bluetooth_vector = []; wifi_vector = []
+
+            target = sample_tuple[0]
+            targets.append(target)
+            idx = 1
+            # Take opinions from enrolled learners
+            for learner in self.learners:
+                sample = [(target, sample_tuple[idx])]
+
+                learner.setTestVector(sample)
+                predict = learner.predictNB(learner.model)[0]
+                learner.setPredictClass(predict)
+                # predict vector for current learner
+                predict_vector = []
+                for t in target_classes:
+                    if t == predict:
+                        predict_vector.append(learner.vote(predict))
+                    else:
+                        predict_vector.append(0)
+                learner.setPredictVector(predict_vector)
+                print learner.getName(), predict_vector
+                result_vector = result_vector + np.array(predict_vector)
+                idx = idx + 1
+
+            ## Ensemble opinions
+            predicted_class = target_classes[result_vector.argmax()]
+            predicts.append(predicted_class)
+            print 
+            print "Predict %s to %s" % (target, predicted_class), result_vector.tolist()
+            
+            # Correct & Reward learners who are right
+            if predicted_class == target:
+                correct = correct + 1
+                for learner in self.learners:
+                    if learner.predict == predicted_class:
+                        learner.weight = learner.weight * 1.1
+            # Wrong & Punish learners who made the wrong decision
+            else:
+                for learner in self.learners:
+                    if learner.predict == predicted_class:
+                        learner.weight = learner.weight * 0.9
+                print learner.getName() + " did wrong for predicting target %s to %s" % (target, predicted_class)
+
+            print '-' * 120
+
+            total = total + 1
+        print
+        self.cm = confusion_matrix(targets, predicts)
+        ## Calculate predict score
+        self.score = float(correct) / total        
+        print "Score of majority voting (%d in %d): %f" % (correct, total, self.score)
+        print
+        ## 
+        print "Recognition rates of individual learners: "
+        for learner in self.learners:
+            print "<%s, %f>" % (learner.getName(), learner.recognition_rate),
+        print; print
+
+        print "Final voting weights for individual learners: "
+        for learner in self.learners:
+            print "<%s, %f>" % (learner.getName(), learner.weight),
+        print
+
 
