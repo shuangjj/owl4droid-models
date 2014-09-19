@@ -52,8 +52,9 @@ class Model:
     def predictNB(self, model):
         return model.predict(self.testvector)
 
-    def predict_profile(self, model):
-
+    def predict_profile(self, model, verbose=False):
+        if verbose:
+            print self.getName(), " model profiling >>> "
         ##
         scene_precision = dict.fromkeys(self.classes, 0.0)
         scene_recall = dict.fromkeys(self.classes, 0.0)
@@ -69,7 +70,7 @@ class Model:
             if predict == self.targets[idx]:
                 scene_TP[predict] = scene_TP[predict] + 1
             else:
-                print predict, self.targets[idx]
+                #print predict, self.targets[idx]
                 scene_FP[predict] = scene_FP[predict] + 1
                 scene_FN[self.targets[idx]] = scene_FN[self.targets[idx]] + 1
                 #self.weight = self.weight * 0.5
@@ -91,7 +92,9 @@ class Model:
 
         self.scene_precision = scene_precision
         self.scene_recall = scene_recall
-        print self.getName(), scene_precision, scene_recall
+        if verbose:
+            print "scene precision: ", scene_precision
+            print "scene recall", scene_recall
 
         ## Model score
         self.recognition_rate = model.score(self.testvector, self.targets)
@@ -315,7 +318,7 @@ class EnsembleModel:
         for learner in learners:
             self.learnerlist.append(learner.getName())
 
-    def recognize(self, ensemble_tuples):
+    def recognize(self, ensemble_tuples, verbose=False):
         ## 
         total = 0; correct = 0
         target_classes = sorted(self.classes)
@@ -347,15 +350,17 @@ class EnsembleModel:
                     else:
                         predict_vector.append(0)
                 learner.setPredictVector(predict_vector)
-                print learner.getName(), predict_vector
+                if verbose:
+                    print learner.getName(), predict_vector
                 result_vector = result_vector + np.array(predict_vector)
                 idx = idx + 1
 
             ## Ensemble opinions
             predicted_class = target_classes[result_vector.argmax()]
             predicts.append(predicted_class)
-            print 
-            print "Predict %s to %s" % (target, predicted_class), result_vector.tolist()
+            if verbose:
+                print 
+                print "Predict %s to %s" % (target, predicted_class), result_vector.tolist()
             
             # Correct & Reward learners who are right
             if predicted_class == target:
@@ -368,9 +373,10 @@ class EnsembleModel:
                 for learner in self.learners:
                     if learner.predict == predicted_class:
                         learner.weight = learner.weight * 0.9
-                print learner.getName() + " did wrong for predicting target %s to %s" % (target, predicted_class)
-
-            print '-' * 120
+                if verbose:
+                    print learner.getName() + " did wrong for predicting target %s to %s" % (target, predicted_class)
+            if verbose:
+                print '-' * 80
 
             total = total + 1
         print

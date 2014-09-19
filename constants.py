@@ -18,3 +18,4 @@ SCRIPT_PATH = FUNFSENS_ROOT + "scripts-0.2.3/"
 ANALYZE_PATH = SCRIPT_PATH + 'data_analyze/'
 SERVER_PATH = SCRIPT_PATH + 'myserver/'
 
+
