@@ -72,7 +72,7 @@ def main():
     train_light = [];    train_audio = []
     train_wifi = [];     train_bluetooth = [] 
 
-    train_tuples = enumerateAllSamples('train', train_scenes, sensors[0], sensors[1:])
+    train_tuples = enumerateAllSamples('train', train_scenes, sensors[0], sensors[1:], 20)
     print "# of train tuples: ", len(train_tuples)
 
     for sample_tuple in train_tuples:
@@ -92,7 +92,7 @@ def main():
             idx = idx + 1
 
 
-    test_tuples = enumerateAllSamples('test', test_scenes, sensors[0], sensors[1:])
+    test_tuples = enumerateAllSamples('test', test_scenes, sensors[0], sensors[1:], 10)
     print "# of test tuples: ", len(test_tuples), 'for ', ' , '.join(test_scenes)
 
     ## Assign test tuples to profile and ensemble tuples

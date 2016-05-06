@@ -10,7 +10,8 @@ import os
 # Enumerate all samples of all kinds of sensors
 # The order of the returned sample tuples is the same with (base, others)
 ##----------------------------------------------------------------------------------------
-def enumerateAllSamples(usage, scenes, base, others):
+def enumerateAllSamples(usage, scenes, base, others, sample_per_scene = 0):
+    sample_cnt_dic = dict.fromkeys(scenes, 0)
     sample_tuples = []
     db = db_helper.DBHelper(FUNFDB, SERVER_PATH)
     query_sql = "SELECT scene, location, date, SUBSTR(time, 1, 2) 'hour', \
@@ -27,6 +28,12 @@ def enumerateAllSamples(usage, scenes, base, others):
         
         if scene not in scenes:
             continue
+
+        if sample_per_scene != 0:
+            if sample_cnt_dic[scene] >= sample_per_scene:
+                continue
+        sample_cnt_dic[scene] = sample_cnt_dic[scene] + 1
+
         # Add base sensor values
         sample_tuple.append(scene)
         sample_tuple.append( getSamplesBySensor(base, dbpath) )
